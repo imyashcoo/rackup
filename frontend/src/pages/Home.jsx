@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
-import { listings as allListings, testimonials, sellers } from "../mock";
+import { testimonials, sellers } from "../mock";
 import { AppContext } from "../App";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -9,9 +9,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { MapPin, Sparkles, Eye, Heart, Share2, Users, Zap, Wallet } from "lucide-react";
 import { toast } from "../hooks/use-toast";
 import axios from "axios";
-
-const API_BASE = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const PINCODE_CSV = "https://www.data.gov.in/files/ogdpv2dms/s3fs-public/dataurl03122020/pincode.csv";
 
 const SectionTitle = ({children, action}) => (
   <div className="flex items-center justify-between mb-3">
@@ -25,7 +22,7 @@ const ListingCard = ({ item, onFav }) => {
   return (
     <Card className="overflow-hidden group">
       <div className="relative aspect-[4/3] overflow-hidden">
-        <img src={item.images[0]} alt={item.title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+        <img src={item.images?.[0]} alt={item.title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
         {item.plus && (
           <Badge className="absolute top-2 left-2 bg-blue-600">RackUp Plus</Badge>
         )}
@@ -41,7 +38,7 @@ const ListingCard = ({ item, onFav }) => {
         </div>
         <div className="flex justify-between items-center mt-3 text-sm">
           <span>Footfall: <b>{item.footfall}</b>/day</span>
-          <span>Revenue: <b>₹{item.expectedRevenue.toLocaleString()}</b>/mo</span>
+          <span>Revenue: <b>₹{(item.expectedRevenue||0).toLocaleString()}</b>/mo</span>
         </div>
         <Button className="w-full mt-3 bg-blue-600 hover:bg-blue-700" onClick={()=>nav(`/listing/${item.id}`)}>
           <Eye className="h-4 w-4 mr-2"/> View Shelf Details
@@ -55,19 +52,32 @@ export default function Home() {
   const { searchText } = useContext(AppContext);
   const [favorites, setFavorites] = useState([]);
   const [cities, setCities] = useState([]);
+  const [items, setItems] = useState([]);
+
+  useEffect(() => {
+    const loadListings = async () => {
+      try {
+        const res = await axios.get(`/listings`, { params: { q: searchText || undefined } });
+        setItems(res.data.items || []);
+      } catch (e) {
+        console.warn('Failed to fetch listings', e?.message);
+        setItems([]);
+      }
+    };
+    loadListings();
+  }, [searchText]);
 
   useEffect(() => {
     const loadLocations = async () => {
+      const PINCODE_CSV = "https://www.data.gov.in/files/ogdpv2dms/s3fs-public/dataurl03122020/pincode.csv";
       try {
-        const stRes = await axios.get(`${API_BASE}/locations/states`);
+        const stRes = await axios.get(`/locations/states`);
         if (!stRes.data || stRes.data.length === 0) {
-          // Trigger import once
-          await axios.post(`${API_BASE}/admin/locations/import`, null, { params: { source: 'remote', url: PINCODE_CSV } });
+          await axios.post(`/admin/locations/import`, null, { params: { source: 'remote', url: PINCODE_CSV } });
         }
-        const citiesRes = await axios.get(`${API_BASE}/locations/cities`, { params: { state: 'Uttar Pradesh' } });
+        const citiesRes = await axios.get(`/locations/cities`, { params: { state: 'Uttar Pradesh' } });
         if (citiesRes.data?.length) setCities(citiesRes.data.slice(0, 12));
       } catch (e) {
-        // fallback silently; keep mock UX
         console.warn('Location fetch failed', e?.message);
       }
     };
@@ -83,12 +93,7 @@ export default function Home() {
     })
   }
 
-  const filtered = useMemo(() => {
-    const q = (searchText || "").toLowerCase();
-    return allListings.filter((l) =>
-      [l.title, l.locality, l.city, l.category].some((t) => t.toLowerCase().includes(q))
-    );
-  }, [searchText]);
+  const filtered = useMemo(() => items, [items]);
 
   return (
     <Layout>
@@ -145,7 +150,7 @@ export default function Home() {
           Exclusive Listing <span className="text-blue-600 ml-2">RackUP Plus</span>
         </SectionTitle>
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {allListings.filter((l)=>l.plus).map((item) => (
+          {filtered.filter((l)=>l.plus).map((item) => (
             <ListingCard key={item.id} item={item} onFav={onFav} />
           ))}
         </div>

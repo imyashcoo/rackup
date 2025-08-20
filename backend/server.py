@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,7 +6,7 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime
 import re
@@ -59,7 +59,7 @@ async def get_status_checks():
     status_checks = await db.status_checks.find().to_list(1000)
     return [StatusCheck(**status_check) for status_check in status_checks]
 
-# Auth endpoints
+# -------------------- Auth endpoints --------------------
 security = HTTPBearer()
 
 class ExchangeReq(BaseModel):
@@ -79,22 +79,230 @@ async def exchange_token(body: ExchangeReq):
         "phone": claims.get("phone_number"),
         "avatar": claims.get("picture"),
         "provider": claims.get("firebase", {}).get("sign_in_provider", "unknown"),
+        "updatedAt": datetime.utcnow(),
+        "createdAt": datetime.utcnow(),
     }
-    await db.users.update_one({"uid": uid}, {"$set": user}, upsert=True)
+    await db.users.update_one({"uid": uid}, {"$set": user, "$setOnInsert": {"createdAt": datetime.utcnow()}}, upsert=True)
     app_token = mint_app_jwt({"sub": uid, **user})
     return {"token": app_token, "user": user}
 
-@api_router.get("/auth/me")
-async def me(credentials: HTTPAuthorizationCredentials = security):
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
     token = credentials.credentials
     try:
         payload = decode_app_jwt(token)
+        return payload
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+@api_router.get("/auth/me")
+async def me(payload: Dict[str, Any] = Depends(get_current_user)):
     return {"user": {k: payload.get(k) for k in ["sub", "name", "email", "phone", "avatar", "provider"]}}
 
+# -------------------- Listings --------------------
+class ListingIn(BaseModel):
+    title: str
+    city: str
+    locality: str
+    category: str
+    images: List[str] = []
+    footfall: int = 0
+    expectedRevenue: int = 0
+    pricePerMonth: int = 0
+    size: str = ""
+    plus: bool = False
+    description: str = ""
 
-# Locations Models
+class Listing(ListingIn):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    ownerId: str
+    createdAt: datetime = Field(default_factory=datetime.utcnow)
+    updatedAt: datetime = Field(default_factory=datetime.utcnow)
+
+@api_router.post("/listings")
+async def create_listing(body: ListingIn, payload: Dict[str, Any] = Depends(get_current_user)):
+    owner_id = payload.get("sub")
+    listing = Listing(ownerId=owner_id, **body.dict())
+    await db.listings.insert_one(listing.dict())
+    return listing
+
+@api_router.get("/listings")
+async def list_listings(q: Optional[str] = None, city: Optional[str] = None, locality: Optional[str] = None,
+                        category: Optional[str] = None, plus: Optional[bool] = None,
+                        minFootfall: Optional[int] = None, maxPrice: Optional[int] = None,
+                        page: int = 1, limit: int = 12):
+    query: Dict[str, Any] = {}
+    if q:
+        regex = {"$regex": q, "$options": "i"}
+        query["$or"] = [
+            {"title": regex}, {"city": regex}, {"locality": regex}, {"category": regex}
+        ]
+    if city: query["city"] = {"$regex": f"^{re.escape(city)}$", "$options": "i"}
+    if locality: query["locality"] = {"$regex": f"^{re.escape(locality)}$", "$options": "i"}
+    if category: query["category"] = {"$regex": f"^{re.escape(category)}$", "$options": "i"}
+    if plus is not None: query["plus"] = plus
+    if minFootfall is not None: query["footfall"] = {"$gte": int(minFootfall)}
+    if maxPrice is not None: query["pricePerMonth"] = {"$lte": int(maxPrice)}
+
+    skip = max(0, (page - 1) * limit)
+    cursor = db.listings.find(query).skip(skip).limit(limit).sort("createdAt", -1)
+    items = [Listing(**doc) async for doc in cursor]
+    total = await db.listings.count_documents(query)
+    return {"items": items, "page": page, "limit": limit, "total": total}
+
+@api_router.get("/listings/{id}")
+async def get_listing(id: str):
+    doc = await db.listings.find_one({"id": id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    return Listing(**doc)
+
+@api_router.patch("/listings/{id}")
+async def update_listing(id: str, body: ListingIn, payload: Dict[str, Any] = Depends(get_current_user)):
+    doc = await db.listings.find_one({"id": id})
+    if not doc: raise HTTPException(status_code=404, detail="Listing not found")
+    if doc.get("ownerId") != payload.get("sub"): raise HTTPException(status_code=403, detail="Not owner")
+    update = body.dict()
+    update["updatedAt"] = datetime.utcnow()
+    await db.listings.update_one({"id": id}, {"$set": update})
+    new_doc = await db.listings.find_one({"id": id})
+    return Listing(**new_doc)
+
+@api_router.delete("/listings/{id}")
+async def delete_listing(id: str, payload: Dict[str, Any] = Depends(get_current_user)):
+    doc = await db.listings.find_one({"id": id})
+    if not doc: raise HTTPException(status_code=404, detail="Listing not found")
+    if doc.get("ownerId") != payload.get("sub"): raise HTTPException(status_code=403, detail="Not owner")
+    await db.listings.delete_one({"id": id})
+    return {"deleted": True}
+
+# -------------------- Favorites --------------------
+@api_router.post("/listings/{id}/favorite")
+async def favorite_listing(id: str, payload: Dict[str, Any] = Depends(get_current_user)):
+    uid = payload.get("sub")
+    await db.favorites.update_one({"userId": uid, "listingId": id}, {"$set": {"userId": uid, "listingId": id, "createdAt": datetime.utcnow()}}, upsert=True)
+    return {"favorited": True}
+
+@api_router.delete("/listings/{id}/favorite")
+async def unfavorite_listing(id: str, payload: Dict[str, Any] = Depends(get_current_user)):
+    uid = payload.get("sub")
+    await db.favorites.delete_one({"userId": uid, "listingId": id})
+    return {"favorited": False}
+
+# -------------------- Conversations & Messages --------------------
+class ConversationIn(BaseModel):
+    listingId: str
+    ownerId: str
+
+class Conversation(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    listingId: str
+    buyerId: str
+    ownerId: str
+    createdAt: datetime = Field(default_factory=datetime.utcnow)
+    lastMessageAt: datetime = Field(default_factory=datetime.utcnow)
+
+class Message(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    conversationId: str
+    senderId: str
+    text: str
+    ts: datetime = Field(default_factory=datetime.utcnow)
+
+@api_router.get("/conversations")
+async def get_conversations(listingId: Optional[str] = None, payload: Dict[str, Any] = Depends(get_current_user)):
+    uid = payload.get("sub")
+    q: Dict[str, Any] = {"$or": [{"buyerId": uid}, {"ownerId": uid}]}
+    if listingId: q["listingId"] = listingId
+    items = [Conversation(**doc) async for doc in db.conversations.find(q).sort("lastMessageAt", -1)]
+    return items
+
+@api_router.post("/conversations")
+async def create_conversation(body: ConversationIn, payload: Dict[str, Any] = Depends(get_current_user)):
+    uid = payload.get("sub")
+    # ensure one convo per buyer+listing
+    existing = await db.conversations.find_one({"buyerId": uid, "listingId": body.listingId, "ownerId": body.ownerId})
+    if existing:
+        return Conversation(**existing)
+    convo = Conversation(listingId=body.listingId, buyerId=uid, ownerId=body.ownerId)
+    await db.conversations.insert_one(convo.dict())
+    return convo
+
+@api_router.get("/conversations/{cid}/messages")
+async def get_messages(cid: str, payload: Dict[str, Any] = Depends(get_current_user)):
+    # Verify membership
+    convo = await db.conversations.find_one({"id": cid})
+    if not convo: raise HTTPException(status_code=404, detail="Conversation not found")
+    if payload.get("sub") not in [convo.get("buyerId"), convo.get("ownerId")]:
+        raise HTTPException(status_code=403, detail="Not a participant")
+    msgs = [Message(**doc) async for doc in db.messages.find({"conversationId": cid}).sort("ts", 1).limit(200)]
+    return msgs
+
+@api_router.post("/conversations/{cid}/messages")
+async def post_message(cid: str, text: str, payload: Dict[str, Any] = Depends(get_current_user)):
+    convo = await db.conversations.find_one({"id": cid})
+    if not convo: raise HTTPException(status_code=404, detail="Conversation not found")
+    if payload.get("sub") not in [convo.get("buyerId"), convo.get("ownerId")]:
+        raise HTTPException(status_code=403, detail="Not a participant")
+    msg = Message(conversationId=cid, senderId=payload.get("sub"), text=text)
+    await db.messages.insert_one(msg.dict())
+    await db.conversations.update_one({"id": cid}, {"$set": {"lastMessageAt": datetime.utcnow()}})
+    # broadcast via WS if connected
+    await ws_manager.broadcast(cid, {"type": "msg", "message": msg.dict()})
+    return msg
+
+# -------------------- WebSocket Chat --------------------
+class WSManager:
+    def __init__(self):
+        self.active: Dict[str, List[WebSocket]] = {}
+
+    async def connect(self, cid: str, websocket: WebSocket):
+        await websocket.accept()
+        self.active.setdefault(cid, []).append(websocket)
+
+    def disconnect(self, cid: str, websocket: WebSocket):
+        conns = self.active.get(cid, [])
+        if websocket in conns:
+            conns.remove(websocket)
+
+    async def broadcast(self, cid: str, data: Dict[str, Any]):
+        for ws in list(self.active.get(cid, [])):
+            try:
+                await ws.send_json(data)
+            except Exception:
+                self.disconnect(cid, ws)
+
+ws_manager = WSManager()
+
+@app.websocket("/api/ws/chat")
+async def ws_chat(websocket: WebSocket):
+    # token and conversationId via query params
+    token = websocket.query_params.get("token")
+    cid = websocket.query_params.get("conversationId")
+    if not token or not cid:
+        await websocket.close(code=4401)
+        return
+    try:
+        payload = decode_app_jwt(token)
+    except Exception:
+        await websocket.close(code=4401)
+        return
+    await ws_manager.connect(cid, websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            if data.get("type") == "msg":
+                text = data.get("text", "")
+                # store and broadcast
+                msg = Message(conversationId=cid, senderId=payload.get("sub"), text=text)
+                await db.messages.insert_one(msg.dict())
+                await db.conversations.update_one({"id": cid}, {"$set": {"lastMessageAt": datetime.utcnow()}})
+                await ws_manager.broadcast(cid, {"type": "msg", "message": msg.dict()})
+            elif data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        ws_manager.disconnect(cid, websocket)
+
+# -------------------- Locations --------------------
 class Location(BaseModel):
     state: str
     city: str

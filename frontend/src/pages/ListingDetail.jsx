@@ -1,19 +1,31 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Layout from "../components/Layout";
 import { useParams, useNavigate } from "react-router-dom";
-import { listings } from "../mock";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Carousel, CarouselContent, CarouselItem } from "../components/ui/carousel";
 import { MapPin, Users, BadgeIndianRupee, MessageSquare } from "lucide-react";
+import axios from "axios";
 
 export default function ListingDetail(){
   const { id } = useParams();
   const nav = useNavigate();
-  const drafts = (()=>{ try { return JSON.parse(localStorage.getItem("ru_drafts")) || [] } catch { return [] } })();
-  const all = [...listings, ...drafts];
-  const item = all.find(l=>l.id===id) || listings[0];
+  const [item, setItem] = useState(null);
+
+  useEffect(()=>{
+    const load = async () => {
+      try {
+        const res = await axios.get(`/listings/${id}`);
+        setItem(res.data);
+      } catch (e) {
+        nav("/");
+      }
+    };
+    load();
+  }, [id]);
+
+  if (!item) return <Layout><section className="max-w-6xl mx-auto px-4 md:px-6 py-6">Loading...</section></Layout>
 
   return (
     <Layout>
@@ -22,7 +34,7 @@ export default function ListingDetail(){
           <Card className="overflow-hidden">
             <Carousel className="w-full">
               <CarouselContent>
-                {item.images.map((src, idx)=> (
+                {item.images?.map((src, idx)=> (
                   <CarouselItem key={idx}>
                     <img src={src} alt={`${item.title}-${idx}`} className="w-full h-[320px] object-cover"/>
                   </CarouselItem>
@@ -38,7 +50,7 @@ export default function ListingDetail(){
             <div className="text-muted-foreground flex items-center gap-2 mb-2"><MapPin className="h-4 w-4"/> {item.locality}, {item.city}</div>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <Card><CardContent className="p-4 flex items-center gap-2"><Users className="h-4 w-4"/> Footfall: <b>{item.footfall}</b>/day</CardContent></Card>
-              <Card><CardContent className="p-4 flex items-center gap-2"><BadgeIndianRupee className="h-4 w-4"/> Exp. Revenue: <b>₹{item.expectedRevenue.toLocaleString()}</b>/mo</CardContent></Card>
+              <Card><CardContent className="p-4 flex items-center gap-2"><BadgeIndianRupee className="h-4 w-4"/> Exp. Revenue: <b>₹{(item.expectedRevenue||0).toLocaleString()}</b>/mo</CardContent></Card>
             </div>
             <p className="mt-4 text-sm leading-6">{item.description}</p>
 
@@ -51,7 +63,7 @@ export default function ListingDetail(){
               {item.owner?.avatar && <img src={item.owner.avatar} alt={item.owner.name} className="h-10 w-10 rounded-full"/>}
               <div>
                 <div className="font-medium">{item.owner?.name || 'Owner'}</div>
-                <div className="text-xs text-muted-foreground">{item.owner?.city || item.city} • Verified seller</div>
+                <div className="text-xs text-muted-foreground">{item.city} • Verified seller</div>
               </div>
             </div>
           </div>

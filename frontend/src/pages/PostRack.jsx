@@ -1,6 +1,5 @@
-import React, { useState } from "react";
+import React, { useContext, useState } from "react";
 import Layout from "../components/Layout";
-import { localities } from "../mock";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -10,13 +9,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Switch } from "../components/ui/switch";
 import { useNavigate } from "react-router-dom";
 import { toast } from "../hooks/use-toast";
+import axios from "axios";
+import { AppContext, AuthContext } from "../App";
 
 export default function PostRack(){
   const nav = useNavigate();
+  const { user } = useContext(AuthContext);
   const [form, setForm] = useState({
     title: "",
     city: "Lucknow",
-    locality: localities[0],
+    locality: "Gomti Nagar",
     footfall: 1000,
     expectedRevenue: 25000,
     pricePerMonth: 5000,
@@ -26,25 +28,20 @@ export default function PostRack(){
     images: [],
     description: ""
   });
-  const [previews, setPreviews] = useState([]);
+  const [imageUrls, setImageUrls] = useState("");
 
-  const onImage = (e) => {
-    const files = Array.from(e.target.files || []);
-    const urls = files.map(f => URL.createObjectURL(f));
-    setPreviews(urls);
-    setForm(f => ({ ...f, images: urls }));
-  };
-
-  const submit = () => {
-    if(!form.title) { toast({ title: "Add a title"}); return; }
-    if(form.images.length===0) { toast({ title: "Add at least one image"}); return; }
-    const id = `draft_${Date.now()}`;
-    const record = { id, owner: { id: "me", name: "You", avatar: "https://i.pravatar.cc/100?img=5", city: form.city }, ...form };
-    const drafts = JSON.parse(localStorage.getItem("ru_drafts") || "[]");
-    drafts.push(record);
-    localStorage.setItem("ru_drafts", JSON.stringify(drafts));
-    toast({ title: "Shelf posted (mock)", description: "Visible only to you for now" });
-    nav(`/listing/${id}`);
+  const submit = async () => {
+    if(!user) { toast({ title: "Please login to post"}); return; }
+    const urls = imageUrls.split(/\n|,\s*/).map(s=>s.trim()).filter(Boolean);
+    if(urls.length === 0) { toast({ title: "Add image URLs (one per line)"}); return; }
+    try {
+      const body = { ...form, images: urls };
+      const { data } = await axios.post(`/listings", body);
+      toast({ title: "Shelf posted" });
+      nav(`/listing/${data.id}`);
+    } catch (e) {
+      toast({ title: "Failed to post", description: e?.message, variant: "destructive" });
+    }
   };
 
   return (
@@ -65,12 +62,7 @@ export default function PostRack(){
                 </div>
                 <div>
                   <Label>Locality</Label>
-                  <Select value={form.locality} onValueChange={(v)=>setForm({ ...form, locality: v })}>
-                    <SelectTrigger><SelectValue placeholder="Select locality"/></SelectTrigger>
-                    <SelectContent>
-                      {localities.map(l=> <SelectItem key={l} value={l}>{l}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <Input value={form.locality} onChange={(e)=>setForm({ ...form, locality: e.target.value })} />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -105,11 +97,8 @@ export default function PostRack(){
 
             <div className="space-y-4">
               <div>
-                <Label>Images</Label>
-                <Input type="file" accept="image/*" multiple onChange={onImage} />
-                <div className="grid grid-cols-3 gap-2 mt-2">
-                  {previews.map((src, i)=> <img key={i} src={src} className="h-24 w-full object-cover rounded" alt={`prev-${i}`}/>) }
-                </div>
+                <Label>Image URLs (one per line)</Label>
+                <Textarea rows={6} value={imageUrls} onChange={(e)=>setImageUrls(e.target.value)} placeholder="https://...jpg\nhttps://...jpg"/>
               </div>
               <div>
                 <Label>Description</Label>
