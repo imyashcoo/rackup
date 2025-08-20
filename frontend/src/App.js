@@ -10,7 +10,7 @@ export const AuthContext = createContext({ user: null, setUser: () => {} });
 export const AppContext = createContext({ searchText: "", setSearchText: () => {} });
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = BACKEND_URL ? `${BACKEND_URL}/api` : "/api"; // never hardcode external URL
+const API = BACKEND_URL ? `${BACKEND_URL}/api` : "/api"; // backend URL from env
 
 function App() {
   const [user, setUser] = useState(() => {
@@ -20,10 +20,20 @@ function App() {
 
   const [searchText, setSearchText] = useState("");
 
+  // Axios defaults + auth header from our app JWT
+  useEffect(() => {
+    axios.defaults.baseURL = API;
+    axios.interceptors.request.use((config)=>{
+      const token = localStorage.getItem("ru_token");
+      if (token) config.headers = { ...(config.headers||{}), Authorization: `Bearer ${token}` };
+      return config;
+    });
+  }, []);
+
   // Ping backend Hello World to confirm connection (non-blocking)
   useEffect(() => {
     const hello = async () => {
-      try { await axios.get(`${API}/`); } catch { /* ignore */ }
+      try { await axios.get(`/`); } catch { /* ignore */ }
     };
     hello();
   }, []);

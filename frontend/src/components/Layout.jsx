@@ -1,6 +1,6 @@
 import React, { useState, useContext, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Search, PlusCircle, User, MapPin, LogOut } from "lucide-react";
+import { Search, PlusCircle, MapPin, LogOut } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
@@ -12,6 +12,8 @@ import { AuthContext, AppContext } from "../App";
 import { useToast } from "../hooks/use-toast";
 import { Toaster } from "../components/ui/toaster";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "../components/ui/input-otp";
+import axios from "axios";
+import { auth, RecaptchaVerifier, signInWithPhoneNumber, GoogleAuthProvider, signInWithPopup, hasFirebaseConfig } from "../lib/firebase";
 
 const logoUrl = "https://customer-assets.emergentagent.com/job_50ed0618-bab3-4cb3-9417-e52f6145f8f7/artifacts/vr7b1plr_rackup_logo-removebg-preview.png";
 
@@ -24,47 +26,85 @@ export default function Layout({ children }) {
   const [otpPhase, setOtpPhase] = useState("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
-  const [sentOtp, setSentOtp] = useState("123456");
+  const [sending, setSending] = useState(false);
+  const [confirmRes, setConfirmRes] = useState(null);
   useToast();
 
-  useEffect(() => {
-    // Close auth modal on login route change
-    if (user) setOpen(false);
-  }, [user]);
+  useEffect(() => { if (user) setOpen(false); }, [user]);
 
-  const onSendOtp = () => {
+  // Initialize invisible reCAPTCHA lazily
+  const setupRecaptcha = () => {
+    if (!window.recaptchaVerifier) {
+      window.recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", { size: "invisible" });
+    }
+  };
+
+  const exchangeToken = async (firebaseUser) => {
+    const idToken = await firebaseUser.getIdToken();
+    const { data } = await axios.post(`/auth/exchange`, { idToken });
+    localStorage.setItem("ru_token", data.token);
+    const profile = data.user || {};
+    setUser({ id: profile.uid || "me", name: profile.name || sellers[0].name, phone: profile.phone, email: profile.email, avatar: profile.avatar || sellers[0].avatar });
+    toast({ title: "Welcome to RackUp" });
+  };
+
+  const onSendOtp = async () => {
     if (!/^[0-9]{10}$/.test(phone)) {
       toast({ title: "Invalid number", description: "Enter a 10-digit mobile number" });
       return;
     }
-    setSentOtp("123456");
-    setOtpPhase("verify");
-    toast({ title: "OTP sent", description: "Use 123456 for demo" });
+    if (!hasFirebaseConfig) {
+      toast({ title: "Firebase keys missing", description: "Add REACT_APP_FIREBASE_* in frontend/.env and restart" });
+      return;
+    }
+    try {
+      setSending(true);
+      setupRecaptcha();
+      const res = await signInWithPhoneNumber(auth, `+91${phone}`, window.recaptchaVerifier);
+      setConfirmRes(res);
+      setOtpPhase("verify");
+      toast({ title: "OTP sent" });
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Failed to send OTP", description: e?.message, variant: "destructive" });
+    } finally { setSending(false); }
   };
 
-  const onVerifyOtp = () => {
-    if (otp === sentOtp) {
-      const demoProfile = sellers[0];
-      setUser({ id: "me", name: demoProfile.name, phone, avatar: demoProfile.avatar });
-      toast({ title: "Welcome to RackUp" });
-    } else {
-      toast({ title: "Incorrect OTP", description: "Try 123456", variant: "destructive" });
+  const onVerifyOtp = async () => {
+    if (!confirmRes) return;
+    try {
+      const cred = await confirmRes.confirm(otp);
+      await exchangeToken(cred.user);
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Incorrect OTP", description: e?.message || "Check code", variant: "destructive" });
     }
   };
 
-  const googleMock = () => {
-    const demoProfile = sellers[1];
-    setUser({ id: "me", name: demoProfile.name, email: "demo@rackup.app", avatar: demoProfile.avatar });
-    toast({ title: "Signed in with Google (mock)" });
+  const googleLogin = async () => {
+    if (!hasFirebaseConfig) {
+      toast({ title: "Firebase keys missing", description: "Add REACT_APP_FIREBASE_* in frontend/.env and restart" });
+      return;
+    }
+    try {
+      const provider = new GoogleAuthProvider();
+      const res = await signInWithPopup(auth, provider);
+      await exchangeToken(res.user);
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Google sign-in failed", description: e?.message, variant: "destructive" });
+    }
   };
 
   const logout = () => {
     setUser(null);
+    localStorage.removeItem("ru_token");
     toast({ title: "Logged out" });
   };
 
   return (
     <div className="min-h-screen flex flex-col">
+      <div id="recaptcha-container" />
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 flex items-center gap-3">
           <Link to="/" className="flex items-center gap-2">
@@ -106,7 +146,10 @@ export default function Layout({ children }) {
                         <div className="space-y-3">
                           <Label htmlFor="phone">Mobile Number</Label>
                           <Input id="phone" inputMode="numeric" maxLength={10} placeholder="Enter 10-digit number" value={phone} onChange={(e)=>setPhone(e.target.value.replace(/[^0-9]/g, ""))} />
-                          <Button className="bg-blue-600 hover:bg-blue-700 w-full" onClick={onSendOtp}>Send OTP</Button>
+                          <Button disabled={sending} className="bg-blue-600 hover:bg-blue-700 w-full" onClick={onSendOtp}>{sending ? "Sending..." : "Send OTP"}</Button>
+                          {!hasFirebaseConfig && (
+                            <p className="text-xs text-muted-foreground">Add Firebase keys in frontend/.env to enable real OTP. For now, this is disabled.</p>
+                          )}
                         </div>
                       )}
                       {otpPhase === "verify" && (
@@ -127,8 +170,8 @@ export default function Layout({ children }) {
                       )}
                     </TabsContent>
                     <TabsContent value="google" className="pt-4">
-                      <Button className="bg-black text-white hover:bg-neutral-800 w-full" onClick={googleMock}>Continue with Google (mock)</Button>
-                      <p className="text-xs text-muted-foreground mt-2">Provide Google OAuth credentials to enable real login.</p>
+                      <Button className="bg-black text-white hover:bg-neutral-800 w-full" onClick={googleLogin}>Continue with Google</Button>
+                      {!hasFirebaseConfig && (<p className="text-xs text-muted-foreground mt-2">Add Firebase keys in frontend/.env to enable Google sign-in.</p>)}
                     </TabsContent>
                   </Tabs>
                 </DialogContent>
@@ -136,7 +179,7 @@ export default function Layout({ children }) {
             ) : (
               <div className="flex items-center gap-2">
                 <img src={user.avatar} alt={user.name} className="h-8 w-8 rounded-full" />
-                <span className="hidden md:block text-sm">Hi, {user.name.split(" ")[0]}</span>
+                <span className="hidden md:block text-sm">Hi, {user.name?.split(" ")[0]}</span>
                 <Button size="icon" variant="ghost" onClick={logout}><LogOut className="h-4 w-4" /></Button>
               </div>
             )}
