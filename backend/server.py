@@ -14,6 +14,8 @@ import io
 import pandas as pd
 import requests
 from pymongo import UpdateOne, ASCENDING
+from utils_auth import verify_firebase_id_token, mint_app_jwt, decode_app_jwt
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 
 ROOT_DIR = Path(__file__).parent
