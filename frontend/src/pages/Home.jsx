@@ -1,6 +1,6 @@
-import React, { useContext, useMemo, useState } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
-import { listings as allListings, localities, testimonials, sellers } from "../mock";
+import { listings as allListings, testimonials, sellers } from "../mock";
 import { AppContext } from "../App";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -8,6 +8,10 @@ import { Badge } from "../components/ui/badge";
 import { Link, useNavigate } from "react-router-dom";
 import { MapPin, Sparkles, Eye, Heart, Share2, Users, Zap, Wallet } from "lucide-react";
 import { toast } from "../hooks/use-toast";
+import axios from "axios";
+
+const API_BASE = process.env.REACT_APP_BACKEND_URL ? `${process.env.REACT_APP_BACKEND_URL}/api` : "/api";
+const PINCODE_CSV = "https://www.data.gov.in/files/ogdpv2dms/s3fs-public/dataurl03122020/pincode.csv";
 
 const SectionTitle = ({children, action}) => (
   <div className="flex items-center justify-between mb-3">
@@ -50,6 +54,25 @@ const ListingCard = ({ item, onFav }) => {
 export default function Home() {
   const { searchText } = useContext(AppContext);
   const [favorites, setFavorites] = useState([]);
+  const [cities, setCities] = useState([]);
+
+  useEffect(() => {
+    const loadLocations = async () => {
+      try {
+        const stRes = await axios.get(`${API_BASE}/locations/states`);
+        if (!stRes.data || stRes.data.length === 0) {
+          // Trigger import once
+          await axios.post(`${API_BASE}/admin/locations/import`, null, { params: { source: 'remote', url: PINCODE_CSV } });
+        }
+        const citiesRes = await axios.get(`${API_BASE}/locations/cities`, { params: { state: 'Uttar Pradesh' } });
+        if (citiesRes.data?.length) setCities(citiesRes.data.slice(0, 12));
+      } catch (e) {
+        // fallback silently; keep mock UX
+        console.warn('Location fetch failed', e?.message);
+      }
+    };
+    loadLocations();
+  }, []);
 
   const onFav = (it) => {
     setFavorites((f)=>{
@@ -106,11 +129,11 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Popular Localities */}
+      {/* Popular Localities (dynamic from backend) */}
       <section className="max-w-7xl mx-auto px-4 md:px-6 py-8">
         <SectionTitle>Popular Localities</SectionTitle>
         <div className="flex flex-wrap gap-2">
-          {localities.map((loc) => (
+          {(cities.length ? cities : ["Gomti Nagar","Indira Nagar","Mahanagar","Chinhat"]).map((loc) => (
             <Badge key={loc} variant="secondary" className="px-4 py-2 rounded-full">{loc}</Badge>
           ))}
         </div>

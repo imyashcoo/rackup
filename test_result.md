@@ -101,3 +101,47 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Replica of OLX-like RackUp with login (phone+OTP, Google), chat, and filters incl. locations via data.gov.in pincode CSV"
+backend:
+  - task: "Locations importer and endpoints"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added /api/admin/locations/import (remote/file), /api/locations/states, /api/locations/cities, /api/locations/search with Mongo indexes."
+frontend:
+  - task: "Fetch and render cities from backend"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/Home.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Home loads states, triggers import if empty using data.gov.in CSV, then shows top cities for Uttar Pradesh."
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: true
+
+test_plan:
+  current_focus:
+    - "Backend: Verify /api/admin/locations/import with provided CSV URL returns counts and no errors"
+    - "Backend: Verify /api/locations/states and /api/locations/cities?state=Uttar%20Pradesh"
+    - "Frontend: Home should display locality chips from backend after import (first load may trigger import)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: "Please test the new locations importer and endpoints and validate frontend consumes them. No auth required for these endpoints yet."
