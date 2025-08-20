@@ -1,0 +1,127 @@
+import React, { useState } from "react";
+import Layout from "../components/Layout";
+import { localities } from "../mock";
+import { Card, CardContent } from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Textarea } from "../components/ui/textarea";
+import { Label } from "../components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Switch } from "../components/ui/switch";
+import { useNavigate } from "react-router-dom";
+import { toast } from "../hooks/use-toast";
+
+export default function PostRack(){
+  const nav = useNavigate();
+  const [form, setForm] = useState({
+    title: "",
+    city: "Lucknow",
+    locality: localities[0],
+    footfall: 1000,
+    expectedRevenue: 25000,
+    pricePerMonth: 5000,
+    size: "4 ft x 2 ft",
+    category: "General",
+    plus: false,
+    images: [],
+    description: ""
+  });
+  const [previews, setPreviews] = useState([]);
+
+  const onImage = (e) => {
+    const files = Array.from(e.target.files || []);
+    const urls = files.map(f => URL.createObjectURL(f));
+    setPreviews(urls);
+    setForm(f => ({ ...f, images: urls }));
+  };
+
+  const submit = () => {
+    if(!form.title) { toast({ title: "Add a title"}); return; }
+    if(form.images.length===0) { toast({ title: "Add at least one image"}); return; }
+    const id = `draft_${Date.now()}`;
+    const record = { id, owner: { id: "me", name: "You", avatar: "https://i.pravatar.cc/100?img=5", city: form.city }, ...form };
+    const drafts = JSON.parse(localStorage.getItem("ru_drafts") || "[]");
+    drafts.push(record);
+    localStorage.setItem("ru_drafts", JSON.stringify(drafts));
+    toast({ title: "Shelf posted (mock)", description: "Visible only to you for now" });
+    nav(`/listing/${id}`);
+  };
+
+  return (
+    <Layout>
+      <section className="max-w-4xl mx-auto px-4 md:px-6 py-6">
+        <h1 className="text-2xl font-semibold mb-4">Post Shelf</h1>
+        <Card>
+          <CardContent className="p-6 grid md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div>
+                <Label>Title</Label>
+                <Input value={form.title} onChange={(e)=>setForm({ ...form, title: e.target.value })} placeholder="e.g., Premium rack near billing counter"/>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>City</Label>
+                  <Input value={form.city} onChange={(e)=>setForm({ ...form, city: e.target.value })} />
+                </div>
+                <div>
+                  <Label>Locality</Label>
+                  <Select value={form.locality} onValueChange={(v)=>setForm({ ...form, locality: v })}>
+                    <SelectTrigger><SelectValue placeholder="Select locality"/></SelectTrigger>
+                    <SelectContent>
+                      {localities.map(l=> <SelectItem key={l} value={l}>{l}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Footfall / day</Label>
+                  <Input type="number" value={form.footfall} onChange={(e)=>setForm({ ...form, footfall: parseInt(e.target.value||"0") })}/>
+                </div>
+                <div>
+                  <Label>Expected Revenue / month (₹)</Label>
+                  <Input type="number" value={form.expectedRevenue} onChange={(e)=>setForm({ ...form, expectedRevenue: parseInt(e.target.value||"0") })}/>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Price / month (₹)</Label>
+                  <Input type="number" value={form.pricePerMonth} onChange={(e)=>setForm({ ...form, pricePerMonth: parseInt(e.target.value||"0") })}/>
+                </div>
+                <div>
+                  <Label>Size</Label>
+                  <Input value={form.size} onChange={(e)=>setForm({ ...form, size: e.target.value })}/>
+                </div>
+              </div>
+              <div>
+                <Label>Category</Label>
+                <Input value={form.category} onChange={(e)=>setForm({ ...form, category: e.target.value })}/>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch id="plus" checked={form.plus} onCheckedChange={(c)=>setForm({ ...form, plus: c })}/>
+                <Label htmlFor="plus">Mark as RackUp Plus</Label>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <Label>Images</Label>
+                <Input type="file" accept="image/*" multiple onChange={onImage} />
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  {previews.map((src, i)=> <img key={i} src={src} className="h-24 w-full object-cover rounded" alt={`prev-${i}`}/>) }
+                </div>
+              </div>
+              <div>
+                <Label>Description</Label>
+                <Textarea rows={6} value={form.description} onChange={(e)=>setForm({ ...form, description: e.target.value })} placeholder="Describe the location, visibility, nearby counters, and power availability"/>
+              </div>
+              <div className="pt-2">
+                <Button className="bg-blue-600 hover:bg-blue-700" onClick={submit}>Submit for Review</Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+    </Layout>
+  );
+}

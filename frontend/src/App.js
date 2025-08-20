@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState, createContext } from "react";
+import React, { useEffect, useState, createContext } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import axios from "axios";
 import Home from "./pages/Home";
 import ListingDetail from "./pages/ListingDetail";
+import Chat from "./pages/Chat";
+import PostRack from "./pages/PostRack";
 
 export const AuthContext = createContext({ user: null, setUser: () => {} });
 export const AppContext = createContext({ searchText: "", setSearchText: () => {} });
@@ -14,7 +16,7 @@ function App() {
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem("ru_user")) } catch { return null }
   });
-  useEffect(()=>{ localStorage.setItem("ru_user", JSON.stringify(user)); }, [user]);
+  React.useEffect(()=>{ localStorage.setItem("ru_user", JSON.stringify(user)); }, [user]);
 
   const [searchText, setSearchText] = useState("");
 
@@ -34,7 +36,8 @@ function App() {
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/listing/:id" element={<ListingDetail />} />
-              {/* Chat and Post routes will be added next */}
+              <Route path="/chat/:listingId" element={<Chat />} />
+              <Route path="/post" element={<PostRack />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </AppContext.Provider>

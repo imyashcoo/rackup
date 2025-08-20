@@ -11,7 +11,9 @@ import { MapPin, Users, BadgeIndianRupee, MessageSquare } from "lucide-react";
 export default function ListingDetail(){
   const { id } = useParams();
   const nav = useNavigate();
-  const item = listings.find(l=>l.id===id) || listings[0];
+  const drafts = (()=>{ try { return JSON.parse(localStorage.getItem("ru_drafts")) || [] } catch { return [] } })();
+  const all = [...listings, ...drafts];
+  const item = all.find(l=>l.id===id) || listings[0];
 
   return (
     <Layout>
@@ -46,10 +48,10 @@ export default function ListingDetail(){
             </div>
 
             <div className="mt-6 flex items-center gap-3">
-              <img src={item.owner.avatar} alt={item.owner.name} className="h-10 w-10 rounded-full"/>
+              {item.owner?.avatar && <img src={item.owner.avatar} alt={item.owner.name} className="h-10 w-10 rounded-full"/>}
               <div>
-                <div className="font-medium">{item.owner.name}</div>
-                <div className="text-xs text-muted-foreground">{item.owner.city} • Verified seller</div>
+                <div className="font-medium">{item.owner?.name || 'Owner'}</div>
+                <div className="text-xs text-muted-foreground">{item.owner?.city || item.city} • Verified seller</div>
               </div>
             </div>
           </div>
