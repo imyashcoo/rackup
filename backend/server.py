@@ -59,6 +59,41 @@ async def get_status_checks():
     status_checks = await db.status_checks.find().to_list(1000)
     return [StatusCheck(**status_check) for status_check in status_checks]
 
+# Auth endpoints
+security = HTTPBearer()
+
+class ExchangeReq(BaseModel):
+    idToken: str
+
+@api_router.post("/auth/exchange")
+async def exchange_token(body: ExchangeReq):
+    try:
+        claims = verify_firebase_id_token(body.idToken)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid Firebase token: {e}")
+    uid = claims.get("uid")
+    user = {
+        "uid": uid,
+        "name": claims.get("name"),
+        "email": claims.get("email"),
+        "phone": claims.get("phone_number"),
+        "avatar": claims.get("picture"),
+        "provider": claims.get("firebase", {}).get("sign_in_provider", "unknown"),
+    }
+    await db.users.update_one({"uid": uid}, {"$set": user}, upsert=True)
+    app_token = mint_app_jwt({"sub": uid, **user})
+    return {"token": app_token, "user": user}
+
+@api_router.get("/auth/me")
+async def me(credentials: HTTPAuthorizationCredentials = security):
+    token = credentials.credentials
+    try:
+        payload = decode_app_jwt(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return {"user": {k: payload.get(k) for k in ["sub", "name", "email", "phone", "avatar", "provider"]}}
+
+
 # Locations Models
 class Location(BaseModel):
     state: str
