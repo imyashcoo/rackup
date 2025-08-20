@@ -36,7 +36,7 @@ export default function PostRack(){
     if(urls.length === 0) { toast({ title: "Add image URLs (one per line)"}); return; }
     try {
       const body = { ...form, images: urls };
-      const { data } = await axios.post(`/listings", body);
+      const { data } = await axios.post(`/listings`, body);
       toast({ title: "Shelf posted" });
       nav(`/listing/${data.id}`);
     } catch (e) {
