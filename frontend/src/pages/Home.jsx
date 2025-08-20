@@ -10,7 +10,7 @@ import { MapPin, Sparkles, Eye, Heart, Share2, Users, Zap, Wallet } from "lucide
 import { toast } from "../hooks/use-toast";
 import axios from "axios";
 
-const API_BASE = process.env.REACT_APP_BACKEND_URL ? `${process.env.REACT_APP_BACKEND_URL}/api` : "/api";
+const API_BASE = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const PINCODE_CSV = "https://www.data.gov.in/files/ogdpv2dms/s3fs-public/dataurl03122020/pincode.csv";
 
 const SectionTitle = ({children, action}) => (
